@@ -1,0 +1,329 @@
+---
+title: "Movie Recommendation"
+author: "Cong Feng"
+date: "11/18/2020"
+output: 
+  pdf_document:
+    df_print: kable
+    number_sections: yes
+highlight-style: tango
+mainfront: Calibri-light
+fontsize: 10pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggthemes)
+```
+
+# Introduction
+
+Recommendation systems are an important part of the modern business. Companies across the world utilize these type of systems to recommend products, movies or even social groups to enhance their users. In this project, we are working a data set of ~10 million observation to build a recommendation system. 
+
+The goal of the project is the minimize the RMSE (root mean square error). It is the formula to determine the effectiveness of the prediction compared to the test data.
+
+The formula is defined:
+$$RMSE =\sqrt{\frac{1}{N}\sum_{u,i}(\hat{y}_{u,i}-y_{u,i})^2}$$
+it takes the square root of the average of the  square of the residual $$(\hat{y}_{u,i}-y_{u,i})$$ user $u$ and movie $i$. This allow us to calculate how close our prediction was to the actual user rating on the validation set.
+
+```{r}
+RMSE <- function(predicted_rating, actual_rating){
+  sqrt(mean((predicted_rating - actual_rating)^2))
+}
+```
+
+Will be our RMSE R function for final testing.
+
+# Exploratory Data Analysis
+
+## Examining the data set
+
+```{r Loading Data, warning=FALSE, include=FALSE}
+
+library(tidyverse)
+library(caret)
+library(knitr)
+library(ggplot2)
+library(data.table)
+
+##########################################################
+# Create edx set, validation set (final hold-out test set)
+##########################################################
+
+# Note: this process could take a couple of minutes
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+
+# if using R 4.0 or later:
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(movieId),
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+
+
+```
+
+We begin by downloading and splitting the data into 2 sets "edx" and "validation" set. The edx set will be our training set and validation set is our test set. The total observations is about ~10 million and it is split 90% for training and 10% for testing.
+
+A quick look into the $edx$ data structure shows:
+```{r}
+dim(edx)
+```
+
+
+```{r Examining Data, echo=FALSE}
+head(edx)
+```
+
+The data is split into 6 columns consist of userId, movieId, date, rating and genre. However, we can already see that there are multiple ratings from 1 user. This makes sense, as one user can rate multiple movies and multiple users can rate the same movie.
+
+```{r unique user and movie}
+c(unique_users = length(unique(edx$userId)), unique_movies = length(unique(edx$movieId)))
+```
+
+We see the number for the unique number of users and movies above. 
+
+## Distribution of Numbers of Rating
+
+Common intuition tells us that not everyone rates or is able to watch every movie. That is inline with what the data tells us. If every uniqued user rated every movie, our data set will be a lot larger.
+
+Let's take a look at the breakdown of the distribution of rating
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+user_avg_n <- edx %>%
+  group_by(userId) %>%
+  summarize(n = n()) %>%
+  summarize(avg = mean(n)) %>%
+  pull(avg)
+
+edx %>%
+  group_by(userId) %>%
+  summarize(n = n()) %>%
+  ggplot(aes(n)) +
+  geom_histogram(color = "white") +
+  scale_x_log10() +
+  geom_vline(xintercept = user_avg_n, color = "red") +
+  annotate("text", x = 500, y = 5500, label = "Average number of ratings", color = "Red") +
+  xlab("Number of ratings (log 10 scale)") +
+  ylab("Number of users") +
+  ggtitle("User - Number of Ratings Distribution") +
+  theme_economist()
+
+```
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+movie_avg_rating <- edx %>%
+  group_by(movieId) %>%
+  summarize(n = n()) %>%
+  summarize(avg = mean(n)) %>%
+  pull(avg)
+
+edx %>%
+  group_by(movieId) %>%
+  summarize(n = n()) %>%
+  ggplot(aes(n)) +
+  geom_histogram(bins = 15, color = "white") +
+  geom_vline(xintercept = movie_avg_rating, color = "red") +
+  annotate("text", x = 5000, y = 1250, label = "Average number of ratings", color = "red") +
+  scale_x_log10() +
+  xlab("Number of Ratings (log 10 scale)") +
+  ylab("Number of Movies") +
+  ggtitle("Movies - Number of Ratings Distribution") +
+  theme_economist()
+```
+
+As we can see from the two figures above, there is a big difference between the distribution of numbers for the user set and the movie set. In the user set we see a large number of ratings is done by a small percentage of the users. The movie distribution however follows a more symmetrical distribution, a large percentage of the movies were rated close to the average number of times while the numbers goes down as you move further to the end of the spectrum.
+
+## Distribution of Ratings
+
+Now let's take a look at how the actual rating is distributed.
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+edx %>%
+  group_by(rating) %>%
+  summarize(n = n()) %>%
+  ggplot(aes(rating, n)) +
+  geom_line() +
+  geom_vline(xintercept = 3.512465, color = "red") +
+  annotate("text", x = 4.25, y = 100, label = "Average Rating", color = "Red") +
+  xlab("Ratings") +
+  ylab("Number of ratings") +
+  theme_economist() +
+  ggtitle("Rating Distribution")
+```
+
+We notice an interesting pattern emerging. It is a lot more likely for users to pick a whole number compared to half ratings and majority of the users gave movies either a 3 or 4. It is also very unlikely for a movie to receive a bad rating compared to an average to great rating.
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+edx %>%
+  group_by(movieId) %>%
+  summarize(rating = mean(rating), n = n(), movieId = first(movieId)) %>%
+  ggplot(aes(n, rating)) +
+  scale_x_sqrt() +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess") +
+  xlab("Number of Ratings (square root scale)") +
+  ylab("Ratings") +
+  theme_economist() +
+  ggtitle("Rating Distribution for Individual Movies")
+
+```
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+edx %>%
+  group_by(userId) %>%
+  summarize(rating = mean(rating), n = n(), userId = first(userId)) %>%
+  ggplot(aes(n, rating)) +
+  scale_x_sqrt() +
+  geom_point(alpha = 0.3) +
+  xlab("Number of Ratings (square root scale)") +
+  ylab("Ratings") +
+  theme_economist() +
+  ggtitle("Rating Distribution for Individual Users")
+```
+When we exam the rating distribution between movies and users, we notice some similarities. At low number of ratings the rating are more varied, however they both normalized towards the mean as the numbers go higher. Also users tend to give higher overall ratings at lower numbers compared to the ratings that movies receive.
+
+*We did not utilize the smoothing function for the Rating Distribution for Individual Users due to hardware limitations*
+
+```{r echo= FALSE, message=FALSE, warning=FALSE}
+
+
+edx %>%
+  group_by(movieId) %>%
+  summarize(movieId = first(movieId), n = n(), stan_dev = sd(rating)) %>%
+  mutate(group = cut(n,
+                     breaks = c(0, mean(n), Inf),
+                     labels = c("< than 843", "> than 843"))) %>%
+  ggplot(aes(stan_dev, fill = group)) +
+  geom_density(alpha = 0.5) +
+  xlab("Standard Deviation") +
+  ylab("Count") +
+  theme_clean() +
+  ggtitle("Standard Deviation of Rating in Movies",
+          subtitle = "Average number of ratings = 843")
+  
+
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+edx %>%
+  group_by(userId) %>%
+  summarize(userId = first(userId), n = n(), stan_dev = sd(rating)) %>%
+  mutate(group = cut(n,
+                     breaks = c(0, mean(n), Inf),
+                     labels = c("< 129", "> 129"))) %>%
+  ggplot(aes(stan_dev, fill = group)) +
+  geom_density(alpha = 0.5) +
+  xlab("Standard Deviation") +
+  ylab("Density") +
+  theme_clean() +
+  ggtitle("Standard Deviation of Ratings for Users",
+          subtitle = "Average number of ratings = 129")
+```
+
+When we take a look at the standard deviation of the user and movie data set, we can see a big difference. For the rating of movies, as the movie get rated more the variance of the rating is lower. However when we look at the user's rating distribution, it's relatively similar variance between someone who rates many movies and someone who does not.
+
+# Modeling
+
+Our goal for this project is to have an RMSE of < 0.86490.
+```{r}
+set.seed(5, sample.kind = "Rounding")
+
+#Create 10% of data partition for testing
+ind <- createDataPartition(edx$rating, times = 1, p = 0.2, list = FALSE)
+
+train_set <- edx[-ind,]
+temp_test <- edx[ind,]
+
+#Validate to make sure entries in test set are also in train set.
+
+test_set <- temp_test %>%
+  semi_join(train_set, by = "movieId") %>%
+  semi_join(train_set, by = "userId")
+
+#Add the removed rows back into the training set
+removed <- anti_join(temp_test, test_set)
+train_set <- rbind(train_set, removed)
+
+rm(temp_test)
+```
+First we will split the original $$edx$$ dataset into a training and test set. We do not want to over-train or over-smooth our model by training it with the validation set at all. The ratio for this partition is 90/10, we will train and test on this set before computing the final RMSE on the validation set.
+
+## Linear Regression
+
+### Baseline
+
+We are going to set the baseline by first performing the simplist prediction - we are going to predict the average rating for every movie and user.
+$$\hat{y}_{u,i}=\mu$$
+$$\hat{y}_{u,i}$$ is the prediction for movie $${i}$$ by user $${u}$$.
+$$\mu$$ is the average rating across all movies and users.
+
+```{r}
+mu <- mean(train_set$rating)
+
+result <- data.frame(Method = "Project Goal", 
+                 RMSE = 0.86490)
+result <- bind_rows(result,
+                    data.frame(Method = "Baseline",
+                           RMSE = RMSE(mu, test_set$rating)))
+result
+
+```
+As we see it's not an accurate prediction, however it does set a good baseline for us to build on.
+
+### User and Movie Bias
+
+We saw in our data analysis that each movie and user have different bias and it showed in the rating distribution. We need to account for those variables in our prediction.
+
+$$\hat{y}_{u,i}=\mu+b_i+b_u+\epsilon_{u,i}$$
+In this formula we added $$b_i$$ bias for movie $${i}$$ and $$b_u$$ bias for user $${u}$$, we also included the standard error of these ratings $$\epsilon_{u,i}$$.
+
+```{r message=FALSE, warning=FALSE}
+
+b_i <- train_set %>%
+  group_by(movieId) %>%
+  summarize(b_i = mu - rating)
+
+b_i %>%
+  ggplot(aes(b_i)) +
+  geom_histogram(color = "white") +
+  ggtitle("Movie Bias") +
+  theme_economist()
+
+```
+
+The graph for movie bias is consistent with our findings in the movie distribution graph. Majority of the movies are actually rated very close to the average, which some exceptional movies receiving a high rating.
+
+```{r}
+
+
+```
+
