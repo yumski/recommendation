@@ -200,7 +200,7 @@ result <- bind_rows(result,
 
 b_i <- train_set %>%
   group_by(movieId) %>%
-  summarize(b_i = mu - rating)
+  summarize(b_i = mean(rating - mu))
 
 b_i %>%
   ggplot(aes(b_i)) +
@@ -217,3 +217,38 @@ result <- bind_rows(result,
                     data.frame(Method = "With Movie Bias",
                                RMSE = RMSE(pred_b_i, test_set$rating)))
 result
+
+#applying b_i and b_u to model
+b_u <- train_set %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu))
+
+b_u %>%
+  ggplot(aes(b_u)) +
+  geom_histogram(color = "white", fill = "blue") +
+  theme_clean() +
+  ggtitle("User Bias")
+
+pred_bui <- test_set %>%
+  left_join(b_u, by = "userId") %>%
+  left_join(b_i, by = "movieId") %>%
+  mutate(pred = mu + b_i + b_u) %>%
+  .$pred
+
+result <- bind_rows(result,
+                    data.frame(Method = "With Movie and User bias",
+                               RMSE = RMSE(pred_bui, test_set$rating)))
+result
+
+#Regularization
+
+titles <- train_set %>%
+  select(movieId, title) %>%
+  distinct()
+
+b_i %>%
+  left_join(titles, by = "movieId") %>%
+  arrange(desc(b_i)) %>%
+  group_by(title) %>%
+  summarize(count = n()) %>%
+  slice(1:10)
