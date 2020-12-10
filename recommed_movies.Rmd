@@ -12,7 +12,7 @@ fontsize: 10pt
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, fig.width=8, fig.height=6, fig.align = "center")
+knitr::opts_chunk$set(echo = TRUE, fig.width=4, fig.height=3)
 
 library(ggthemes)
 library(recosystem)
@@ -106,7 +106,7 @@ dim(edx)
 head(edx)
 ```
 
-The data is split into 6 columns consist of userId, movieId, date, rating and genre.
+The data is split into 6 columns consist of userId, movieId, date, rating, title and genre.
 
 ```{r unique user and movie}
 c(unique_users = length(unique(edx$userId)), unique_movies = length(unique(edx$movieId)))
@@ -119,7 +119,7 @@ We see the number for the unique number of users and movies above. Right away we
 Let's take a look at the breakdown of the distribution of rating
 
 
-```{r echo=FALSE, message=FALSE, warning=FALSE}
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.align = "center"}
 user_avg_n <- edx %>%
   group_by(userId) %>%
   summarize(n = n()) %>%
@@ -142,7 +142,7 @@ edx %>%
 ```
 
 
-```{r, echo = FALSE, message=FALSE, warning=FALSE}
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.align = "center"}
 movie_avg_rating <- edx %>%
   group_by(movieId) %>%
   summarize(n = n()) %>%
@@ -169,7 +169,7 @@ There is a big difference between the distribution of numbers for the user set a
 
 Here is how the actual rating is distributed.
 
-```{r, echo = FALSE, message=FALSE, warning=FALSE}
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.align = "center"}
 edx %>%
   group_by(rating) %>%
   summarize(n = n()) %>%
@@ -185,7 +185,7 @@ edx %>%
 
 It is a lot more likely for users to pick a whole number compared to half ratings and majority of the users gave movies either a 3 or 4. It is also very unlikely for a movie to receive a bad rating compared to an average to great rating.
 
-```{r, echo = FALSE, message=FALSE, warning=FALSE}
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.align = "center"}
 edx %>%
   group_by(movieId) %>%
   summarize(rating = mean(rating), n = n(), movieId = first(movieId)) %>%
@@ -232,7 +232,7 @@ edx %>%
   
 ```
 
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
+```{r, echo = FALSE, message = FALSE, warning = FALSE, fig.align = "center"}
 edx %>%
   group_by(userId) %>%
   summarize(userId = first(userId), n = n(), stan_dev = sd(rating)) %>%
@@ -274,7 +274,6 @@ top_um <- edx %>%
   spread(title, rating) %>%
   as.matrix()
 
-top_um
 ```
 To make a manageable matrix, I took the top 20 most rated movies and users as a sample.
 
@@ -285,11 +284,11 @@ h <- hclust(d)
 plot(h, cex = 0.65, main = "User Clusters", xlab = "")
 
 ```
-With this small sample we can already start seeing clusters of users.
+One of the important methods of calculating similarity is by calculating the distance between objects. With this small sample size we can already start observing clusters of users. This shows that some users like similar taste in movies while very different from others. This is also consistent with common intuition.
 ```{r message=FALSE, warning=FALSE}
 heatmap(as.matrix(d), col = RColorBrewer::brewer.pal(11, "Spectral"))
 ```
-We can also visualize this better with a heatmap.
+We can also visualize this better with a heatmap. The color range from dark red to purple, dark red meaning they're very similar to purple meaning the opposite.
 
 # Modeling
 
@@ -315,7 +314,7 @@ train_set <- rbind(train_set, removed)
 
 rm(temp_test)
 ```
-First we will split the original $$edx$$ dataset into a training and test set. We do not want to over-train or over-smooth our model by training it with the validation set at all. The ratio for this partition is 90/10, we will train and test on this set before computing the final RMSE on the validation set.
+First we will split the original edx dataset into a training and test set. We do not want to over-train or over-smooth our model by training it with the validation set at all. The ratio for this partition is 90/10, we will train and test on this set before computing the final RMSE on the validation set.
 
 ## Linear Regression
 
@@ -324,7 +323,7 @@ First we will split the original $$edx$$ dataset into a training and test set. W
 To establish a baseline, we are going to predict the average rating for every movie and user.
 
 $$\hat{y}_{u,i}=\mu$$
-$$\hat{y}_{u,i}$$ is the prediction for movie $${i}$$ by user $${u}$$.
+$$\hat{y}_{u,i}$$ is the prediction for movie i by user u.
 $$\mu$$ is the average rating across all movies and users.
 
 ```{r message=FALSE, warning=FALSE}
@@ -346,7 +345,7 @@ It's not an accurate prediction the RMSE is over 1, however it does provide a go
 Our data analysis showed that each movie and user have different bias, we can account for those with the formula below.
 
 $$\hat{y}_{u,i}=\mu+b_i+b_u+\epsilon_{u,i}$$
-In this formula we added $$b_i$$ bias for movie $${i}$$ and $$b_u$$ bias for user $${u}$$, we also included the standard error of these ratings $$\epsilon_{u,i}$$.
+In this formula we added bi bias for movie i and bu bias for user u, we also included the standard error of these ratings $$\epsilon_{u,i}$$.
 
 ```{r Movie Bias, message=FALSE, warning=FALSE}
 b_i <- train_set %>%
@@ -361,7 +360,7 @@ b_i %>%
 
 ```
 
-The graph for movie bias is consistent with our findings in the movie distribution graph. Majority of the movies are rated very close to the average, which some exceptional movies receiving a high rating. The $$b_i$$ is skewed towards negative, meaning majority of the movies are rated below the average.
+The graph for movie bias is consistent with our findings in the movie distribution graph. Majority of the movies are rated very close to the average, which some exceptional movies receiving a high rating. The movie bias is skewed towards negative, meaning majority of the movies are rated below the average.
 
 ```{r message=FALSE, warning=FALSE}
 pred_b_i <- mu + test_set %>%
@@ -390,7 +389,7 @@ b_u %>%
   ggtitle("User Bias")
 ```
 
-The distribution of the user bias is similar to the one for the movies. However, unlike the the movie bias, the $$b_u$$ is a balanced distribution. The majority of the users rate very close to the $$\mu$$.
+The distribution of the user bias is similar to the one for the movies. However, unlike the the movie bias, the user bias is a balanced distribution. The majority of the users rate very close to the average.
 ```{r message=FALSE, warning=FALSE}
 
 pred_bui <- test_set %>%
@@ -423,9 +422,9 @@ b_i %>%
 Here is the top 10 movies according to our adjusted movie bias rating. It's all movies that have 1 rating and are obscure. This finding is consistent with the movie rating distribution plot. The movies with a few ratings was very varied compared to the movies with a lot of ratings and may not reflect the rating of a lot of users. To account for this we need to add the least square method to our model.
 
 $$\sum_{u,i}(y_{u,i}-\mu-b_i)^2+\lambda\sum_ib^2_i$$
-To account for the low number of rating, we introduce $$\lambda$$ to penalize the regression to control the variability. This method will shrink the $$\hat{b}_i$$ towards 0 when the $$n_i$$ is low, but will be effectively ignored when it has a lot of rating.
+To account for the low number of rating, we introduce a variable to penalize the regression to control the variability. This method will shrink the bias towards 0 when the number of rating is low, but will be effectively ignored when it has a lot of rating.
 
-$$lambda$$ is a tuning parameter, we can use machine learning to determine what's the optimal number.
+We will run a range of penalty from 0 to 10 to determine the optimal penalty.
 ```{r message=FALSE, warning=FALSE}
 #define lambda range
 lambdas <- seq(0,10,0.25)
@@ -462,7 +461,7 @@ lambda <- lambdas[which.min(regularization_rmse)]
 lambda
 ```
 
-$$\lambda$$ was applied to the algorithm at an interval of 0.25 from 0 to 10. We see that 5.0 provides the lowest RMSE.
+We see that 5.0 provides the lowest RMSE.
 
 ```{r message=FALSE, warning=FALSE}
 b_i_reg <- train_set %>%
@@ -486,7 +485,7 @@ result
 
 ## Matrix Factorization
 
-Another popular method of machine learning method is matrix factorization. From the heatmap and dendrogram from our data analysis we saw clusters of users and movies. We can use this data to calculate how likely user $$u$$ is to rate movie $$i$$ based on other users of similar rating habit as them. To optimize the process, we will use the r package $$recosystem$$.
+Another popular method of machine learning method is matrix factorization. From the heatmap and dendrogram from our data analysis we saw clusters of users and movies. We can use this data to calculate how likely user u is to rate movie i based on other users of similar rating habit as them. To optimize the process, we will use the r package recosystem.
 
 A guide to this can be found at: https://cran.r-project.org/web/packages/recosystem/vignettes/introduction.html 
 
@@ -579,4 +578,4 @@ In this data science project I utilized the skills I learned in this course to b
 
 - Built two different machine learning models based on different approach. The Linear Regression model achieved RMSE of 0.8468177 and the Matrix Factorization Model achived RMSE of 0.8069243; both below the goal of 0.8469.
 
-Overall this project was challenging and fun to work on. I got to apply the knowledge I learned from the course and built upon the examples from Professor Irizarry. Working with such a large data set did come with some challenges and limitations. I was not able to run some models due to hardware limitation, excited to experiment on another data set for other class project.
+Overall this project was challenging and fun to work on. I got to apply the knowledge I learned from the course and built upon the examples from Professor Irizarry. Working with such a large data set did come with some challenges and limitations. I was not able to run some models due to hardware limitation. I am excited to experiment on another data set for other class project.
