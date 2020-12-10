@@ -164,6 +164,33 @@ edx %>%
   ggtitle("Standard Deviation of Ratings for Users",
           subtitle = "Average number of ratings = 129")
 
+# Build heatmap for top 20 users vs movies
+top_m <- edx %>%
+  group_by(movieId) %>%
+  summarize(n = n()) %>%
+  arrange(desc(n)) %>%
+  slice(1:20)
+
+top_u <- edx %>%
+  group_by(userId) %>%
+  summarize(n = n()) %>%
+  arrange(desc(n)) %>%
+  slice(1:20)
+
+top_um <- edx %>%
+  right_join(top_m, by = "movieId") %>%
+  right_join(top_u, by = "userId") %>%
+  select(title, userId, rating) %>%
+  spread(title, rating) %>%
+  as.matrix()
+
+d <- dist(top_um)
+
+h <- hclust(d)
+plot(h, cex = 0.65, main = "", xlab = "")
+
+heatmap(as.matrix(d), col = RColorBrewer::brewer.pal(11, "Spectral"))
+
 #Build test and train set
 
 set.seed(5, sample.kind = "Rounding")
@@ -189,9 +216,10 @@ rm(temp_test)
 #Define Mu and baseline for test
 
 mu <- mean(train_set$rating)
+goal <- 0.8649000
 
 result <- data.frame(Method = "Project Goal", 
-                     RMSE = 0.86490)
+                     RMSE = goal)
 result <- bind_rows(result,
                     data.frame(Method = "Baseline",
                                RMSE = RMSE(mu, test_set$rating)))
@@ -252,3 +280,113 @@ b_i %>%
   group_by(title) %>%
   summarize(count = n()) %>%
   slice(1:10)
+
+#define lambda range
+lambdas <- seq(0,10,0.25)
+
+
+regularization_rmse <- sapply(lambdas, function(l){
+  
+  #movie bias regularized
+  b_i_r <- train_set %>%
+    group_by(movieId) %>%
+    summarize(b_i_r = sum(rating - mu)/(n()+l))
+  
+  #movie + user bias regularized
+  b_u_r <- train_set %>%
+    left_join(b_i_r, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u_r = sum(rating - b_i_r - mu)/(n()+l))
+  
+  predicted_ratings <- test_set %>%
+    left_join(b_i_r, by = "movieId") %>%
+    left_join(b_u_r, by = "userId") %>%
+    mutate(pred = mu + b_i_r + b_u_r) %>%
+    .$pred
+  return(RMSE(predicted_ratings, test_set$rating))
+})
+
+data.frame(Lambda = lambdas, RMSE = regularization_rmse) %>%
+  ggplot(aes(x = Lambda, y = RMSE)) +
+  geom_point() +
+  theme_clean() +
+  ggtitle("Lambda vs RMSE")
+
+lambda <- lambdas[which.min(regularization_rmse)]
+lambda
+
+# Top 10 after regularization
+b_i_reg <- train_set %>%
+  group_by(movieId) %>%
+  summarize(b_i_reg = sum(rating - mu)/(n()+lambda))
+
+b_i_reg  %>%
+  left_join(titles, by = "movieId") %>%
+  arrange(desc(b_i_reg)) %>%
+  slice(1:10)
+
+# Matrix Factorization
+set.seed(1987, sample.kind = "Rounding")
+
+train_dat <- with(train_set, data_memory(user_index = userId,
+                                         item_index = movieId,
+                                         rating = rating))
+test_dat <- with(test_set, data_memory(user_index = userId,
+                                       item_index = movieId,
+                                       rating = rating))
+
+r = Reco()
+
+#Tuning the algorithm
+opts_tune <- r$tune(train_dat, opts = list(dim = 10,
+                                           niter = 10))
+#Training with tuning paramter
+r$train(train_dat, opts = c(opts_tune$min))
+
+# Predict the rating
+pred_reco <- r$predict(test_dat, out_memory())
+
+result <- bind_rows(result, data.frame(Method = "Matrix Factorization",
+                                       RMSE = RMSE(pred_reco, test_set$rating)))
+result
+
+# Apply model to validation data
+
+edx_mu <- mean(edx$rating)
+
+edx_bi <- edx %>%
+  group_by(movieId) %>%
+  summarize(edx_bi = sum(rating - edx_mu)/(n() + lambda))
+
+edx_bu <- edx %>%
+  left_join(edx_bi, by = "movieId") %>%
+  group_by(userId) %>%
+  summarize(edx_bu = sum(rating - edx_bi - edx_mu)/(n() + lambda))
+
+pred_edx_lm <- validation %>%
+  left_join(edx_bi, by = "movieId") %>%
+  left_join(edx_bu, by = "userId") %>%
+  summarize(pred = edx_mu + edx_bi + edx_bu) %>%
+  .$pred
+
+final_results <- data.frame(Method = "Regularized bias",
+                            RMSE = RMSE(pred_edx_lm, validation$rating),
+                            Goal = goal)
+final_results
+
+edx_dat <- with(edx, data_memory(user_index = userId,
+                                 item_index = movieId,
+                                 rating = rating))
+v_dat <- with(validation, data_memory(user_index = userId,
+                                      item_index = movieId,
+                                      rating = rating))
+
+r$train(edx_dat, opts = opts_tune$min)
+
+v_pred_mf <- r$predict(v_dat, out_memory())
+
+
+final_results <- bind_rows(final_results, data.frame(Method = "Matrix Factorization",
+                                                     RMSE = RMSE(v_pred_mf, validation$rating),
+                                                     Goal = goal))
+final_results
